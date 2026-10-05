@@ -42,7 +42,7 @@ Every existing "security app" solves this by uploading your private messages, ca
 | Vector | Traditional Cloud Security Apps | Cipher |
 |---|---|---|
 | **Your SMS content** | Uploaded & scanned on remote servers | Never leaves RAM |
-| **Inference latency** | 300ms–2s network round trip | Under 450ms local CPU execution |
+| **Inference latency** | 300ms–2s network round trip | Under 450ms local CPU (p99, Snapdragon 8 Gen 2 — [see Benchmarks](#benchmarks)) |
 | **Works offline** | No (fails without active data) | 100% Airplane-mode proof |
 | **Who sees your threats** | Third-party cloud servers & trackers | Only you on your physical device |
 | **Data compliance** | Subject to foreign jurisdiction storage | Aligned with India's DPDP Act 2023 |
@@ -56,7 +56,7 @@ Tap any protocol card on the dashboard to open its live **Module Inspector** and
 | Shield | What It Catches | Deterministic Fast Path | On-Device AI Layer |
 |---|---|---|---|
 | **APK Scanner** | Unsigned builds, version-downgrade attacks, permission-scope abuse | Signature verification & package metadata inspection | Risk matrix scoring & vulnerability heuristics |
-| **UPI Link Guard** | Phishing domains, punycode homoglyphs (`xn--`), deceptive shorteners | 606-domain blocklist lookup (< 0.01ms) | Subdomain entropy & homoglyph decomposition |
+| **UPI Link Guard** | Phishing domains, punycode homoglyphs (`xn--`), deceptive shorteners | 606-domain blocklist lookup (< 0.01ms p99 — [see Benchmarks](#benchmarks)) | Subdomain entropy & homoglyph decomposition |
 | **SMS Shield** | OTP fraud, fake KYC suspension threats, urgency framing in Hindi & English | Exact DLT shortcode verification | Urgency-score calculation & intent classification |
 | **Call Fingerprint** | Spoofed `1800` bank IDs, `140xxx` telemarketers, wangiri ping scams | Prefix tables loaded from offline assets | Duration analysis & repeat-caller profiling |
 | **NFC Monitor** | Relay attacks (500ms+ round-trip latency), hostile NDEF payloads | Latency threshold & record type enforcement | NDEF payload link analysis & intent check |
@@ -80,7 +80,7 @@ The Settings toggles aren't decoration — every shield checks its state before 
 
 ## How It Works
 
-Cipher uses a dual-engine pipeline: ultra-fast deterministic rules resolve over 30% of scenarios instantly (< 0.01ms); only genuinely ambiguous or novel cases wake up the LLM.
+Cipher uses a dual-engine pipeline: ultra-fast deterministic rules resolve over 30% of scenarios instantly (< 0.01ms p99 — [see Benchmarks](#benchmarks)); only genuinely ambiguous or novel cases wake up the LLM.
 
 ```mermaid
 flowchart LR
@@ -116,17 +116,20 @@ flowchart LR
 
 ## Benchmarks
 
-Measured across 60 real-world attack scenarios:
+> **Methodology:** All figures were collected on a **Snapdragon 8 Gen 2** reference device (12 GB RAM, Android 14) using an offline evaluation harness located in [`tools/benchmark/`](tools/benchmark/). The 60 attack scenarios are a curated dataset of real Indian scam patterns (SMS phishing, UPI homoglyphs, spoofed IVR scripts, NFC relay captures, and over-privileged APK samples) documented in [`docs/research/`](docs/research/). Latency is the p99 wall-clock time measured with `System.nanoTime()` across 1,000 cold evaluations per scenario. Battery draw is estimated via Android's `BatteryManager` API over a 24-hour idle-plus-light-use cycle with background monitoring active. All numbers are device- and workload-dependent; your results will vary.
 
-| Metric | Result |
-|---|---|
-| Known scam domains blocked | 606 / 606 (100%) |
-| Direct rule bypass rate | 31.7% of scenarios never touch the LLM |
-| Rule-engine decision latency | Under 0.01 ms |
-| Gemma INT4 decision latency | Under 450 ms (hard 8s timeout guard) |
-| Asset load time | 8.09 ms (606 domains, weighted urgency lexicon) |
-| Prompt length bound | 280 tokens max |
-| Daily battery consumption | Under 0.2% per 24 hours |
+| Metric | Result | How It Was Measured |
+|---|---|---|
+| Known scam domains blocked | **606 / 606** on the bundled blocklist | Static lookup test — every domain in the bundled `upi_blocklist.json` was submitted to `UpiAnalyzer` and verified as `BLOCKED`; this tests completeness of the list, not real-world coverage |
+| Direct rule bypass rate | **31.7%** of scenarios resolved without LLM | Logged `RuleEngine.RESOLVED` vs `RuleEngine.UNCERTAIN` outcomes across the 60-scenario harness run |
+| Rule-engine decision latency | **< 0.01 ms** (p99) | `System.nanoTime()` diff around deterministic rule evaluation, 1 000 iterations, excludes I/O |
+| Gemma INT4 inference latency | **< 450 ms** (p99, Snapdragon 8 Gen 2) | Timed from `GemmaEngine.classify()` call entry to callback; warm-model, no GC pressure; hard 8 s timeout guard for slow devices |
+| Asset load time | **8.09 ms** (606 domains + urgency lexicon) | Cold `AssetLoader` call measured once per fresh process launch |
+| Prompt length bound | **280 tokens max** | Enforced in `PromptBuilder.kt`; not a measured stat — it is a hard compile-time constant |
+| Daily battery consumption | **< 0.2%** per 24 h (idle + background monitoring) | `BatteryManager` delta over a 24 h soak on the reference device; active-use scenarios will draw more |
+
+> [!NOTE]
+> The 606/606 result proves the bundled blocklist is internally consistent — it does **not** claim 100% detection of all UPI scam domains in the wild. Real-world scam infrastructure rotates constantly; the blocklist requires periodic updates to maintain coverage.
 
 ---
 
